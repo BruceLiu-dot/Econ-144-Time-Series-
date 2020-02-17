@@ -1,0 +1,265 @@
+---
+title: "Project 2"
+author: "Yaohua Liu, Zecheng Fan"
+date: "May 23, 2019"
+output: html_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Introduction
+
+The data we are interested in analyzing are monthly industrial production of sugar and confectionery product (sugar) and the industrial production on ice cream and frozen dessert (ice) in the US. Both data are collected from FRED Economic Data https://fred.stlouisfed.org/ with the time span from Jan. 1st, 1972 to March 1st, 2019. 
+
+
+# a)
+```{r, warning=FALSE}
+library(fpp)
+library(stats)
+library(strucchange) 
+library(vars)
+sugar_data <- read.csv("sugar.csv")
+sugar <- ts(sugar_data$IPN31152N, start = c(1972,1,1), frequency = 12)
+ice <-  ts(read.csv('ice.csv')[,2], start=1972, freq=12)
+tsdisplay(sugar)
+tsdisplay(ice)
+```
+
+# b)
+## Model fit for sugar
+```{r}
+# Use stl to breakdown seasonality and trend then fit arima to the residuals
+model1 <- stl(sugar, s.window = "periodic")
+
+# Using the seasonality/trend components from stl and fit the rest using auto.arima
+
+# Model using both seasonality and trend
+model1_full <- auto.arima(sugar, xreg = cbind(model1$time.series[,2], model1$time.series[,1]))
+# Model using just trend 
+model1_full2 <- auto.arima(sugar, xreg = cbind(model1$time.series[,2]))
+# Model using auto.arima for everything
+model3 <- auto.arima(sugar)
+
+# Comparing their respective residuals and BIC to select preferred model
+plot(sugar)
+lines(model1_full$fitted, col = "red")
+BIC(model1_full)
+BIC(model1_full2)
+BIC(model3)
+Box.test(model1_full$residuals, type = c("Box-Pierce"))
+Box.test(model1_full2$residuals, type = c("Box-Pierce"))
+Box.test(model3$residuals, type = c("Box-Pierce"))
+
+plot(sugar)
+lines(model1_full2$fitted, col= "red")
+
+summary(model1_full2)
+```
+
+From looking at the graphs of this time series, we oberserve that there exists obvious trend, seasonal, and cycle components. To explore a good fit of the data, we try to use stl decomposition to capture the trend/seasonality components of the data and then fit the remainder with auto.arima to capture the cycle component. We see that model using the trend component from stl and using auto.arima to fit the rest is the preferred model because it has the lowest BIC and the highest statistic score from the Box-Pierce test. The model we preferred is ARIMA(4,0,1) with seasonality (0,1,1) and extra regressors from the trend component of stl decmoposition. 
+
+## Model fit for ice
+```{r}
+# Mannual Breakdown
+t = seq(from=1972,to=2019+2/12,by=1/12)
+
+m1 = lm(ice~t+I(t*t)+I(t*t*t))
+summary(m1)
+
+## Examine how the trend fit
+plot(ice)
+lines(ts(m1$fitted.values, start=1972, freq=12), col="red")
+
+
+# Seasonality
+plot(m1$residuals, type='l')
+season = seasonaldummy(ice)
+m2 = lm(m1$residuals~season)
+summary(m2)
+
+## Examine how the seasonality fit
+plot(ice)
+lines(ts(m2$fitted.values+m1$fitted.values, start=1972, freq=12),col="blue")
+```
+
+Now to examine to residauls to check if there exhibit patterns for cycles
+```{r}
+## Examine Residuals
+plot(m2$residuals, type='l')
+tsdisplay(m2$residuals,lag.max=50)
+```
+
+Obviously the residual exhibits patterns for cycle, there is an overall decreasing trend in ACF with some fluctuations. There are subsequent spikes in PACF at lag=1,13,25, could suggesting a S-AR(3). There are also fluctuations in PACF overall, suggesting some MA pattern. Thus, we test several different ARMA models. We also performed an auto.arima on the residuals to find the best model.
+
+```{r}
+# Cycle
+temp = auto.arima(m2$residuals)
+print(temp)
+m3 = Arima(m2$residuals, order=c(5,0,1), seasonal=list(order=c(3,0,0)))
+temp = auto.arima(m3$residuals)
+print(temp)
+plot(ts(m3$fitted+m2$fitted.values+m1$fitted.values, start=1972, freq=12),col="blue")
+lines(ice)
+plot(m3$residuals)
+```
+
+auto.arima gives suggests us a model of ARIMA(5,0,1). Thus, we do a fit for ARIMA(5,0,1) with S-AR(3). We did an auto.arima test on the residuals of model m3 and it suggests no cyclical patterns remaining in the residuals.
+Do the box test and check the recursive residuals
+```{r}
+# Test Residuals
+tsdisplay(m3$residuals, lag.max=50)
+Box.test(m3$residuals,type="Box-Pierce")
+```
+
+We checked our residuals' ACF and PACF and discover some spikes. However, if we do an auto.arima on the residuals, the result shows no further patterns can be found. We conclude that this is the best mdoel we can form up to now.
+We checked the recursive residuals and CUSUM plot and both show that there is no structural break in our model.
+
+Then we compare the result with the results generated from STL and auto.arima.
+We will perform an STL decomposition and plug the trend and the seasonality from STL into auto.arima to generate the final model.
+Indeed, we tried many combinations of STL and auto.arima and we discovered that using the trend from STL and the rest from auto.arima gives the best model of best BIC and best Box-Pierce result.
+
+```{r}
+stlmodel = stl(ice,s.window="periodic")
+plot(stlmodel)
+x3 = auto.arima(ice, xreg=cbind(stlmodel$time.series[,2]))
+Box.test(x3$residuals, type="Box-Pierce")
+summary(x3)
+plot(ice)
+lines(x3$fitted, col="red")
+```
+
+We can tell that the auto-generated model x3 performs much better according to the Box-Pierce test. So this will be our preferred model for the time series on ice. 
+We see that model using the trend component from stl and using auto.arima to fit the rest is the preferred model because it has the lowest BIC and the highest 
+
+# c)
+## Residuals graphs for sugar
+```{r}
+plot(model1_full2$fitted, model1_full2$residuals)
+```
+
+The residuals seem to be show a fairly random pattern with a slight increasing variance of the residuals. This shows that our model is a pretty good fit to the data but can perhaps be slightly improved. 
+
+## Residual graphs for ice
+```{r}
+plot(x3$fitted, x3$residuals)
+```
+
+We see that the residuals for ice also has a fairly random pattern without any pattern. The variance of the residuals also seem to be constant throughout, indicating a good fir to the data. 
+
+#d)
+## ACF and PACF of the residuals for sugar
+```{r}
+tsdisplay(model1_full2$residuals)
+```
+
+## ACF and PACF of the residuals for ice
+```{r}
+tsdisplay(x3$residuals)
+```
+
+From looking at the ACF and PACF of both residuals, we see that there is no significant structure left in the residuals. Some strong spikes in the ACF and PACF may indicate some further improvements to be made in our model, but both of our models seem to be a good fit to the datas. 
+
+# e)
+## Cusum plots for sugar
+```{r}
+plot(efp(model1_full2$res~1, type = "Rec-CUSUM"))
+```
+
+## Cusum plots for ice
+```{r}
+plot(efp(x3$residuals~1, type = "Rec-CUSUM"))
+```
+
+Our CUSUM plots show that although our empirical fluctuation process gradually get closer to the boundaries, there is no model breakage for either model.
+
+# f)
+## Recursive residuals on sugar
+```{r}
+y=recresid(model1_full2$res~1)
+plot(y, pch=16,ylab="Recursive Residuals")
+```
+
+## Recursive residuals on ice
+```{r}
+y=recresid(x3$res~1)
+plot(y, pch=16,ylab="Recursive Residuals")
+```
+
+From looking at the recursive residual plots for both models, we don't see any large gap/discontinuity. This indicates that our model will not break under our datas. 
+
+# g)
+## Diagnostic statistics Discussion
+
+From looking at the residual plots and the recursive cusum plots, there is very little structure left in the residuals and there is no problem for model breakage. The Box-Pierce test confirms that the residuals are clsoe to being white-noise. We can perhaps improve the models slightly by addressing the non-constant variance in the sugar model. Overall, our models seem ot be good fit to the data. 
+
+# h)
+## Forecasting for sugar
+```{r}
+f <- seasadj(model1)
+ft <- forecast(f, h = 12)
+
+plot(forecast(model1_full2, xreg = cbind(ft$mean)))
+```
+
+## Forecasting for ice
+```{r}
+# Obtain the forecasted trend from STL
+t1 = stl(stlmodel$time.series[,2],s.window="periodic")
+f1 = forecast(t1, h=12)
+
+
+plot(forecast(x3, xreg=cbind(f1$mean)))
+```
+
+# k)
+```{r}
+VARselect(cbind(sugar,ice),lag.max=100)
+
+grangertest(sugar~ice, order=13)
+grangertest(ice~sugar, order=13)
+
+var_model <-VAR(cbind(sugar,ice), p=13)
+plot(var_model)
+
+```
+
+Varselect suggests that a VAR model of order 13 is the best model to fit. 
+
+# j)
+```{r}
+irf(var_model)
+plot(irf(var_model))
+```
+
+From looking at the plots, we see that shocks from sugar have very little effects on ice and vice versa. Through the majority of plot, the 95% CI includes 0, indicating that there is no significant effects from the shocks of sugar/ice onto the other time series. 
+
+# k)
+```{r}
+grangertest(sugar~ice, order=13)
+grangertest(ice~sugar, order=13)
+```
+
+Our Granger Causality tests show that there are strong significance that the change in production of sugar causes the change in production of ice and vice versa. They exhibit causality relations to each other. 
+
+# l)
+## Forecast using VAR
+```{r}
+predict(var_model, n.ahead = 12)
+
+r_model_sugar <- auto.arima(sugar)
+r_model_ice <- auto.arima(ice)
+
+forecast(r_model_sugar, h = 12)
+forecast(r_model_ice, h = 12)
+```
+
+For the production on sugar, we see that the point forecast from ARIMA are consistently lower than the forecast from VAR. The confidence interval from ARIMA model is also narrower than the VAR model. For the production on ice, the same pattern can be seen but both the point forecasts and the confidence intervals are a lot similar between VAR and ARIMA. 
+
+# Future Works
+From the analysis on both series, we conclude that the production of sugar and confectionery and the production of ice cream/ frozen dessert have major influence over each other. Intuitively, this make sense because frozen dessert are usually sweet and its production process involves the production of sugar. Both time series show strong seasonality since the raw materail of their productions probably involve seasonal plants. The future works of our analysis can be more generalized and look into other consumer goods that uses sugar in its production to perhaps draw conclusion on the relationship between sugar and all other goods that involves sugar. 
+
+# Sources
+Data on sugar production: https://fred.stlouisfed.org/series/IPG3113N
+Data on Ice-cream production: https://fred.stlouisfed.org/series/IPN31152N
